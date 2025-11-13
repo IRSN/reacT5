@@ -1,433 +1,459 @@
 """
-Materials module for pytrip5 package.
+Materials module for pytrip5 - PyDrag-inspired simple interface.
 
-This module handles material definitions including nuclide compositions,
-temperatures, and densities.
+This module provides a simplified, user-friendly interface for material definitions,
+inspired by PyDrag's philosophy of simplicity.
 """
 
-from typing import Dict, Optional, List, Union
+from typing import Optional, Dict
 from .core import PyTrip5Object, ValidationError, Validator
 
 
-class Material(PyTrip5Object):
+class Materials:
     """
-    Class representing a material with nuclide composition.
+    Main materials manager with pre-defined common materials.
 
-    A material consists of one or more nuclides with specified concentrations
-    and physical properties such as temperature and density.
+    Inspired by PyDrag's Materials() class for simplicity.
+
+    Example:
+        >>> materials = Materials(catalog_path="path/to/catalog.yaml")
+        >>> materials.UO2.set_density(10.5)
+        >>> materials.UO2.set_enrichment('U235', 0.04)
+        >>> materials.water.set_temperature(600.0)
     """
 
-    def __init__(
-        self,
-        name: str,
-        temperature: float = 300.0,
-        density: Optional[float] = None,
-        density_unit: str = "g/cm3",
-        **kwargs
-    ):
+    def __init__(self, catalog_path: Optional[str] = None):
         """
-        Initialize a Material.
+        Initialize Materials manager.
 
         Parameters
         ----------
-        name : str
-            Name of the material
+        catalog_path : str, optional
+            Path to Tripoli-5 nuclear data catalog (YAML file)
+        """
+        self._catalog_path = catalog_path
+        self._catalog = None
+        self._fuel_temperature = 900.0  # K
+
+        # Pre-defined materials (PyDrag style)
+        self.UO2 = Mix('UO2', temperature=900.0)
+        self.water = Mix('water', temperature=600.0)
+        self.Zr4 = Mix('Zircaloy-4', temperature=600.0)
+        self.void = Mix('void', temperature=300.0)
+        self.SS304 = Mix('SS304', temperature=600.0)
+        self.Inconel = Mix('Inconel', temperature=600.0)
+        self.AIC = Mix('AIC', temperature=600.0)  # Ag-In-Cd
+        self.B4C = Mix('B4C', temperature=600.0)
+        self.Pyrex = Mix('Pyrex', temperature=600.0)
+
+        # Store custom materials
+        self._custom_materials: Dict[str, 'Mix'] = {}
+
+        # Initialize default compositions
+        self._init_default_materials()
+
+    def _init_default_materials(self):
+        """Initialize default material compositions."""
+        # UO2 defaults
+        self.UO2.set_density(10.5)
+        self.UO2._composition = {
+            'U235': 0.04,
+            'U238': 0.96,
+            'O16': 2.0
+        }
+
+        # Water defaults
+        self.water.set_density(0.7)
+        self.water._composition = {
+            'H1': 2.0,
+            'O16': 1.0
+        }
+
+        # Zircaloy-4 defaults
+        self.Zr4.set_density(6.5)
+        self.Zr4._composition = {
+            'Zr90': 0.5145,
+            'Zr91': 0.1122,
+            'Zr92': 0.1715,
+            'Zr94': 0.1738,
+            'Zr96': 0.0280
+        }
+
+        # Void (vacuum)
+        self.void.set_density(0.0)
+        self.void._composition = {}
+
+    def set_tfuel(self, temperature: float, unit: str = 'K'):
+        """
+        Set fuel temperature (PyDrag compatibility).
+
+        Parameters
+        ----------
         temperature : float
-            Temperature in Kelvin (default: 300.0 K)
-        density : float, optional
-            Material density
-        density_unit : str
-            Unit for density ('g/cm3', 'atoms/barn-cm', or 'kg/m3')
-        **kwargs
-            Additional keyword arguments
-        """
-        super().__init__(name, **kwargs)
-        self._temperature = Validator.validate_temperature(temperature)
-        self._density = density
-        self._density_unit = self._validate_density_unit(density_unit)
-        self._nuclides: Dict[str, float] = {}
-        self._is_void = False
-
-    @property
-    def temperature(self) -> float:
-        """Get material temperature in Kelvin."""
-        return self._temperature
-
-    @temperature.setter
-    def temperature(self, value: float):
-        """Set material temperature."""
-        self._temperature = Validator.validate_temperature(value)
-
-    @property
-    def density(self) -> Optional[float]:
-        """Get material density."""
-        return self._density
-
-    @density.setter
-    def density(self, value: float):
-        """Set material density."""
-        self._density = Validator.validate_positive(value, "Density")
-
-    @property
-    def density_unit(self) -> str:
-        """Get density unit."""
-        return self._density_unit
-
-    @property
-    def nuclides(self) -> Dict[str, float]:
-        """Get dictionary of nuclides and their concentrations."""
-        return self._nuclides.copy()
-
-    @staticmethod
-    def _validate_density_unit(unit: str) -> str:
-        """
-        Validate density unit.
-
-        Parameters
-        ----------
+            Temperature value
         unit : str
-            Density unit string
-
-        Returns
-        -------
-        str
-            Validated unit
-
-        Raises
-        ------
-        ValidationError
-            If unit is invalid
+            Temperature unit: 'K' (Kelvin) or 'C' (Celsius)
         """
-        valid_units = ['g/cm3', 'atoms/barn-cm', 'kg/m3']
-        if unit not in valid_units:
-            raise ValidationError(
-                f"Invalid density unit '{unit}'. Must be one of {valid_units}"
-            )
-        return unit
+        if unit == 'C':
+            temperature = temperature + 273.15
+        self._fuel_temperature = Validator.validate_temperature(temperature)
+        self.UO2.set_temperature(temperature)
 
-    def add_nuclide(self, nuclide: str, concentration: float):
+    def make_mix(self, name: str, temperature: float = 300.0) -> 'Mix':
         """
-        Add a nuclide to the material.
-
-        Parameters
-        ----------
-        nuclide : str
-            Nuclide name (e.g., 'U235', 'H1', 'O16')
-        concentration : float
-            Nuclide concentration (atomic fraction or number density)
-
-        Raises
-        ------
-        ValidationError
-            If concentration is invalid
-        """
-        if concentration < 0:
-            raise ValidationError(
-                f"Nuclide concentration must be non-negative, got {concentration}"
-            )
-
-        if not nuclide:
-            raise ValidationError("Nuclide name cannot be empty")
-
-        self._nuclides[nuclide] = concentration
-
-    def remove_nuclide(self, nuclide: str):
-        """
-        Remove a nuclide from the material.
-
-        Parameters
-        ----------
-        nuclide : str
-            Nuclide name to remove
-
-        Raises
-        ------
-        KeyError
-            If nuclide not found in material
-        """
-        if nuclide not in self._nuclides:
-            raise KeyError(f"Nuclide '{nuclide}' not found in material '{self.name}'")
-        del self._nuclides[nuclide]
-
-    def get_concentration(self, nuclide: str) -> float:
-        """
-        Get concentration of a specific nuclide.
-
-        Parameters
-        ----------
-        nuclide : str
-            Nuclide name
-
-        Returns
-        -------
-        float
-            Nuclide concentration
-
-        Raises
-        ------
-        KeyError
-            If nuclide not found
-        """
-        if nuclide not in self._nuclides:
-            raise KeyError(f"Nuclide '{nuclide}' not found in material '{self.name}'")
-        return self._nuclides[nuclide]
-
-    def normalize_concentrations(self):
-        """
-        Normalize nuclide concentrations to sum to 1.0.
-
-        This is useful when working with atomic fractions.
-        """
-        total = sum(self._nuclides.values())
-        if total == 0:
-            raise ValidationError("Cannot normalize: total concentration is zero")
-
-        self._nuclides = {
-            nuclide: conc / total
-            for nuclide, conc in self._nuclides.items()
-        }
-
-    def scale_concentrations(self, factor: float):
-        """
-        Scale all nuclide concentrations by a factor.
-
-        Parameters
-        ----------
-        factor : float
-            Scaling factor
-
-        Raises
-        ------
-        ValidationError
-            If factor is not positive
-        """
-        if factor <= 0:
-            raise ValidationError(f"Scaling factor must be positive, got {factor}")
-
-        self._nuclides = {
-            nuclide: conc * factor
-            for nuclide, conc in self._nuclides.items()
-        }
-
-    def set_void(self):
-        """Set material as void (no nuclides)."""
-        self._is_void = True
-        self._nuclides = {}
-        self._density = 0.0
-
-    def is_void(self) -> bool:
-        """
-        Check if material is void.
-
-        Returns
-        -------
-        bool
-            True if material is void
-        """
-        return self._is_void or len(self._nuclides) == 0
-
-    def validate(self) -> bool:
-        """
-        Validate the material configuration.
-
-        Returns
-        -------
-        bool
-            True if valid
-
-        Raises
-        ------
-        ValidationError
-            If configuration is invalid
-        """
-        if not self._is_void and len(self._nuclides) == 0:
-            raise ValidationError(
-                f"Material '{self.name}' has no nuclides defined"
-            )
-
-        # Check temperature is reasonable
-        Validator.validate_temperature(self._temperature)
-
-        return True
-
-    def to_tripoli5(self):
-        """
-        Convert to Tripoli-5 material object.
-
-        Returns
-        -------
-        object
-            Tripoli-5 material object
-        """
-        # Placeholder for actual Tripoli-5 API integration
-        # Example: import tripoli5; return tripoli5.Material(...)
-        pass
-
-    def __repr__(self) -> str:
-        """String representation."""
-        n_nuclides = len(self._nuclides)
-        return (
-            f"Material(name='{self.name}', T={self._temperature}K, "
-            f"nuclides={n_nuclides})"
-        )
-
-
-class MaterialLibrary:
-    """
-    Class for managing a library of materials.
-
-    This provides a registry of predefined materials that can be reused.
-    """
-
-    def __init__(self):
-        """Initialize MaterialLibrary."""
-        self._materials: Dict[str, Material] = {}
-
-    def add_material(self, material: Material):
-        """
-        Add a material to the library.
-
-        Parameters
-        ----------
-        material : Material
-            Material to add
-        """
-        self._materials[material.name] = material
-
-    def get_material(self, name: str) -> Material:
-        """
-        Get a material from the library.
+        Create a custom material mix.
 
         Parameters
         ----------
         name : str
             Material name
+        temperature : float
+            Temperature in Kelvin
 
         Returns
         -------
-        Material
-            Material object
-
-        Raises
-        ------
-        KeyError
-            If material not found
+        Mix
+            New material mix
         """
-        if name not in self._materials:
-            raise KeyError(f"Material '{name}' not found in library")
-        return self._materials[name]
+        mix = Mix(name, temperature=temperature)
+        self._custom_materials[name] = mix
+        return mix
 
-    def remove_material(self, name: str):
+    def load_catalog(self, catalog_path: str):
         """
-        Remove a material from the library.
+        Load Tripoli-5 nuclear data catalog.
+
+        Parameters
+        ----------
+        catalog_path : str
+            Path to catalog YAML file
+        """
+        self._catalog_path = catalog_path
+        try:
+            import tripoli5.delos
+            self._catalog = tripoli5.delos.Catalog.fromFile(catalog_path)
+        except ImportError:
+            raise ValidationError(
+                "Tripoli-5 not available. Cannot load catalog."
+            )
+
+    def to_tripoli5_materials(self) -> Dict[str, 'tripoli5.materials.Mixture']:
+        """
+        Convert all materials to Tripoli-5 Mixture objects.
+
+        Returns
+        -------
+        Dict[str, Mixture]
+            Dictionary of material name to Tripoli-5 Mixture
+        """
+        if self._catalog is None:
+            raise ValidationError(
+                "No catalog loaded. Call load_catalog() first."
+            )
+
+        materials = {}
+
+        # Convert pre-defined materials
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if isinstance(attr, Mix) and not attr.name.startswith('_'):
+                materials[attr.name] = attr.to_tripoli5(self._catalog)
+
+        # Convert custom materials
+        for name, mix in self._custom_materials.items():
+            materials[name] = mix.to_tripoli5(self._catalog)
+
+        return materials
+
+
+class Mix(PyTrip5Object):
+    """
+    Material mixture class (PyDrag-style).
+
+    Provides simple setters for material properties.
+    """
+
+    def __init__(self, name: str, temperature: float = 300.0, **kwargs):
+        """
+        Initialize Mix.
 
         Parameters
         ----------
         name : str
-            Material name to remove
+            Material name
+        temperature : float
+            Temperature in Kelvin
         """
-        if name not in self._materials:
-            raise KeyError(f"Material '{name}' not found in library")
-        del self._materials[name]
+        super().__init__(name, **kwargs)
+        self._temperature = Validator.validate_temperature(temperature)
+        self._density: Optional[float] = None
+        self._composition: Dict[str, float] = {}
+        self._enrichment: Dict[str, float] = {}
+        self._boron_ppm: float = 0.0
+        self._pressure: Optional[float] = None
 
-    def list_materials(self) -> List[str]:
+    def set_density(self, density: float):
         """
-        Get list of available materials.
+        Set material density (g/cm³).
+
+        Parameters
+        ----------
+        density : float
+            Density in g/cm³
+        """
+        self._density = Validator.validate_non_negative(density, "density")
+
+    def set_temperature(self, temperature: float, unit: str = 'K'):
+        """
+        Set material temperature.
+
+        Parameters
+        ----------
+        temperature : float
+            Temperature value
+        unit : str
+            'K' for Kelvin or 'C' for Celsius
+        """
+        if unit == 'C':
+            temperature = temperature + 273.15
+        self._temperature = Validator.validate_temperature(temperature)
+
+    def set_enrichment(self, isotope: str, fraction: float):
+        """
+        Set isotope enrichment (PyDrag style).
+
+        Parameters
+        ----------
+        isotope : str
+            Isotope name (e.g., 'U235', 'U238')
+        fraction : float
+            Atomic or weight fraction
+        """
+        self._enrichment[isotope] = fraction
+        self._composition[isotope] = fraction
+
+    def set_boron(self, ppm: float):
+        """
+        Set boron concentration in ppm (for water).
+
+        Parameters
+        ----------
+        ppm : float
+            Boron concentration in parts per million
+        """
+        self._boron_ppm = Validator.validate_non_negative(ppm, "boron ppm")
+
+    def set_pressure(self, pressure: float):
+        """
+        Set pressure (bar).
+
+        Parameters
+        ----------
+        pressure : float
+            Pressure in bar
+        """
+        self._pressure = Validator.validate_positive(pressure, "pressure")
+
+    def set_compo(self, isotope: str, concentration: float):
+        """
+        Set isotope composition/concentration.
+
+        Parameters
+        ----------
+        isotope : str
+            Isotope name
+        concentration : float
+            Atomic concentration
+        """
+        self._composition[isotope] = concentration
+
+    def add_element(self, element: str, fraction: float):
+        """
+        Add element to composition.
+
+        Parameters
+        ----------
+        element : str
+            Element name or isotope
+        fraction : float
+            Atomic fraction
+        """
+        self._composition[element] = fraction
+
+    @property
+    def temperature(self) -> float:
+        """Get temperature in Kelvin."""
+        return self._temperature
+
+    @property
+    def density(self) -> Optional[float]:
+        """Get density in g/cm³."""
+        return self._density
+
+    @property
+    def composition(self) -> Dict[str, float]:
+        """Get composition dictionary."""
+        return self._composition.copy()
+
+    def validate(self) -> bool:
+        """Validate material configuration."""
+        if self._density is None and self.name != 'void':
+            raise ValidationError(f"Material '{self.name}' has no density set")
+
+        if not self._composition and self.name != 'void':
+            raise ValidationError(f"Material '{self.name}' has no composition")
+
+        return True
+
+    def to_tripoli5(self, catalog=None):
+        """
+        Convert to Tripoli-5 Mixture using MixtureBuilder.
+
+        Parameters
+        ----------
+        catalog : tripoli5.delos.Catalog, optional
+            Nuclear data catalog
 
         Returns
         -------
-        List[str]
-            List of material names
+        tripoli5.materials.Mixture
+            Tripoli-5 Mixture object
         """
-        return list(self._materials.keys())
+        try:
+            import tripoli5.materials
+            from tripoli5.core.literals import K
 
-    def __contains__(self, name: str) -> bool:
-        """Check if a material exists in the library."""
-        return name in self._materials
+            builder = (
+                tripoli5.materials.MixtureBuilder("concentrations")
+                .withName(self.name)
+                .withTemperature(self._temperature * K)
+            )
+
+            if catalog is not None:
+                builder = builder.withCatalog(catalog)
+
+            # Add all isotopes/elements
+            for isotope, conc in self._composition.items():
+                builder = builder.add(isotope, conc)
+
+            return builder.build()
+
+        except ImportError:
+            raise ValidationError(
+                "Tripoli-5 not available. Cannot create Tripoli-5 materials."
+            )
 
     def __repr__(self) -> str:
         """String representation."""
-        return f"MaterialLibrary(materials={self.list_materials()})"
+        return (
+            f"Mix(name='{self.name}', T={self._temperature}K, "
+            f"ρ={self._density}, n_isotopes={len(self._composition)})"
+        )
 
 
-# Predefined common materials
-def create_water(temperature: float = 600.0, name: str = "H2O") -> Material:
+# Convenience functions for creating common materials
+def create_uo2(enrichment: float = 4.0, temperature: float = 900.0,
+               density: float = 10.5, name: str = "UO2") -> Mix:
     """
-    Create a water material.
-
-    Parameters
-    ----------
-    temperature : float
-        Temperature in Kelvin
-    name : str
-        Material name
-
-    Returns
-    -------
-    Material
-        Water material
-    """
-    water = Material(name, temperature=temperature, density=0.7)
-    water.add_nuclide("H1", 2.0)
-    water.add_nuclide("O16", 1.0)
-    return water
-
-
-def create_uo2_fuel(enrichment: float = 4.0, temperature: float = 900.0,
-                    name: str = "UO2") -> Material:
-    """
-    Create a UO2 fuel material.
+    Create UO2 fuel material.
 
     Parameters
     ----------
     enrichment : float
-        U-235 enrichment in percent
+        U-235 enrichment in percent (default: 4.0%)
     temperature : float
-        Temperature in Kelvin
+        Temperature in Kelvin (default: 900 K)
+    density : float
+        Density in g/cm³ (default: 10.5)
     name : str
         Material name
 
     Returns
     -------
-    Material
-        UO2 fuel material
+    Mix
+        UO2 material
     """
     if not 0 < enrichment <= 20:
-        raise ValidationError(
-            f"Enrichment must be between 0 and 20%, got {enrichment}"
-        )
+        raise ValidationError(f"Enrichment must be 0-20%, got {enrichment}")
 
-    fuel = Material(name, temperature=temperature, density=10.5)
+    fuel = Mix(name, temperature=temperature)
+    fuel.set_density(density)
+
     u235_frac = enrichment / 100.0
     u238_frac = 1.0 - u235_frac
 
-    fuel.add_nuclide("U235", u235_frac)
-    fuel.add_nuclide("U238", u238_frac)
-    fuel.add_nuclide("O16", 2.0)
+    fuel.set_enrichment('U234', 0.0002 * u235_frac)  # Natural U234
+    fuel.set_enrichment('U235', u235_frac)
+    fuel.set_enrichment('U238', u238_frac)
+    fuel.set_enrichment('U236', 0.0001 * u235_frac)  # Trace U236
+    fuel.add_element('O16', 2.0)
 
     return fuel
 
 
-def create_zircaloy(temperature: float = 600.0, name: str = "Zircaloy") -> Material:
+def create_water(temperature: float = 600.0, density: float = 0.7,
+                 boron_ppm: float = 0.0, name: str = "H2O") -> Mix:
     """
-    Create a Zircaloy cladding material.
+    Create water material.
 
     Parameters
     ----------
     temperature : float
         Temperature in Kelvin
+    density : float
+        Density in g/cm³
+    boron_ppm : float
+        Boron concentration in ppm
     name : str
         Material name
 
     Returns
     -------
-    Material
+    Mix
+        Water material
+    """
+    water = Mix(name, temperature=temperature)
+    water.set_density(density)
+    water.add_element('H1', 2.0)
+    water.add_element('O16', 1.0)
+
+    if boron_ppm > 0:
+        water.set_boron(boron_ppm)
+        # Add boron isotopes (simplified)
+        b_fraction = boron_ppm * 1e-6
+        water.add_element('B10', 0.199 * b_fraction)
+        water.add_element('B11', 0.801 * b_fraction)
+
+    return water
+
+
+def create_zircaloy(temperature: float = 600.0, density: float = 6.5,
+                    name: str = "Zircaloy-4") -> Mix:
+    """
+    Create Zircaloy-4 cladding material.
+
+    Parameters
+    ----------
+    temperature : float
+        Temperature in Kelvin
+    density : float
+        Density in g/cm³
+    name : str
+        Material name
+
+    Returns
+    -------
+    Mix
         Zircaloy material
     """
-    zr = Material(name, temperature=temperature, density=6.5)
-    zr.add_nuclide("Zr90", 0.5145)
-    zr.add_nuclide("Zr91", 0.1122)
-    zr.add_nuclide("Zr92", 0.1715)
-    zr.add_nuclide("Zr94", 0.1738)
-    zr.add_nuclide("Zr96", 0.0280)
+    zr = Mix(name, temperature=temperature)
+    zr.set_density(density)
+
+    # Natural zirconium isotopic composition
+    zr.add_element('Zr90', 0.5145)
+    zr.add_element('Zr91', 0.1122)
+    zr.add_element('Zr92', 0.1715)
+    zr.add_element('Zr94', 0.1738)
+    zr.add_element('Zr96', 0.0280)
+
     return zr
