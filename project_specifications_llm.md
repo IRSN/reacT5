@@ -1,5 +1,5 @@
 
-# pytrip5 — project specification & Claude prompt
+# pytrip5 — project specification
 
 > Objective: build `pytrip5`, a Python high-level interface for Tripoli-5 enabling full-core PWR modelling and simulations. Use Tripoli-5 Python API and take inspiration from PyDrag (IRSN) for design patterns and API ergonomics.
 
@@ -275,3 +275,4 @@ Tell me which of the three you'd like me to start generating right now and I wil
 [3]: https://gitlab.extra.irsn.fr/PyDrag/PyDrag/-/tree/3e529c52e61acf3665ded882c4270202960804ec/docs/source?utm_source=chatgpt.com "docs/source · 3e529c52e61acf3665ded882c4270202960804ec"
 [4]: https://tripoli5.asnr.dev/documentation/examples/features/score.html?utm_source=chatgpt.com "Scores — TRIPOLI-5 user guide 0.2.0-wip documentation"
 [5]: https://tripoli5.asnr.dev/documentation/release/changelog.html?utm_source=chatgpt.com "Changelog — TRIPOLI-5 user guide 0.2.0-wip ... - asnr.dev"
+
